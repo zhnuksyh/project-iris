@@ -9,7 +9,6 @@ __pycache__/
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
 
 # Dataset directories (never commit raw or processed image data)
 data/raw/
