@@ -38,7 +38,7 @@ All raw data lives under `data/raw/<subset>/` and is excluded from git.
 - **Backbone:** Depthwise Separable Convolutions (XCeption-style, miniaturized)
 - **Pooling:** GlobalAveragePooling2D
 - **Output:** L2-Normalized Dense embedding layer (no bias)
-- **Embedding dimension:** TBD during Phase 3
+- **Embedding dimension:** 512
 
 ### Loss Function: ArcFace (Additive Angular Margin Loss)
 - Enforces intra-class compactness and inter-class separation
@@ -92,7 +92,7 @@ All raw data lives under `data/raw/<subset>/` and is excluded from git.
 |---|---|---|
 | Phase 1 | Environment & Scaffold | Complete |
 | Phase 2 | Preprocessing Implementation | Complete |
-| Phase 3 | Model Architecture (IrisNet) | Pending |
+| Phase 3 | Model Architecture (IrisNet) | Complete |
 | Phase 4 | Training with ArcFace | Pending |
 | Phase 5 | Baseline (Gabor Filter) | Pending |
 | Phase 6 | Evaluation & Comparison | Pending |
@@ -121,6 +121,33 @@ All raw data lives under `data/raw/<subset>/` and is excluded from git.
 | **Grand Total**     | **30 626** | **18 225** | **62.7%** |
 
 Lamp/Thousand lower rates are expected — ring illuminator creates circular artefacts that confuse HoughCircles; Thousand has heavy occlusion variation. 30 626 tensors of shape `(128, 128, 1)` float32 saved to `data/processed/`.
+
+---
+
+## Phase 3 Notes — Model Architecture
+
+### IrisNet (MiniIrisXception) — Final Architecture
+| Component | Detail |
+|---|---|
+| Total parameters | 423,232 |
+| Embedding dimension | 512 |
+| Input shape | (128, 128, 1) |
+| Output | L2-normalised embedding (unit norm) |
+
+**Layer flow:**
+- Initial Block: Conv2D(32) → BN → ReLU → MaxPool → (64, 64, 32)
+- Entry Block 1: SepConv residual, 32→64 ch, stride 2 → (32, 32, 64)
+- Entry Block 2: SepConv residual, 64→128 ch, stride 2 → (16, 16, 128)
+- Middle Flow ×3: Identity residual, 128 ch, Dropout(0.2) → (16, 16, 128)
+- Exit Block: SepConv residual, 128→256 ch, stride 2 → (8, 8, 256)
+- Head: GlobalAveragePooling2D → Dense(512, no bias) → Lambda(L2-normalise)
+
+**ArcFace Layer (training head):**
+- Default margin `m = 0.5`, scale `s = 64.0`
+- Trainable class prototype weights W of shape (512, num_classes)
+- Input: `(embeddings, labels_onehot)` → output: scaled logits for cross-entropy
+
+**NumPy constraint:** TF 2.10 requires NumPy < 2.0. Pin `numpy<2.0` in any new environment.
 
 ---
 
