@@ -94,7 +94,7 @@ All raw data lives under `data/raw/<subset>/` and is excluded from git.
 | Phase 2 | Preprocessing Implementation | Complete |
 | Phase 3 | Model Architecture (IrisNet) | Complete |
 | Phase 4 | Baseline (Gabor Filter) | Complete |
-| Phase 5 | Model Training with ArcFace | Pending |
+| Phase 5 | Model Training with ArcFace | Complete |
 | Phase 6 | Evaluation & Comparison | Pending |
 
 ---
@@ -173,6 +173,42 @@ Lamp/Thousand lower rates are expected — ring illuminator creates circular art
 | Impostor (subject 050/L vs subject 100/L) | 0.4996 | Correct rejection (> 0.32 threshold) |
 
 Note: Classical Gabor IrisCode is noise-sensitive — genuine pairs can score > 0.32 in practice. This motivates IrisNet, which is expected to achieve much stronger genuine/impostor separation.
+
+---
+
+## Phase 5 Notes — Model Training
+
+### Dataset Split
+| Split | Samples | Note |
+|---|---|---|
+| Train | 20,238 | 70% stratified per identity; augmented (RandomRotation ±5%) |
+| Val   | 6,180  | 20% stratified |
+| Test  | 4,364  | 10% stratified; paths saved to `data/test_split.json` |
+| **Total** | **30,782** | 4,115 identity classes |
+
+Identities with 1 sample → train only. Identities with 2 samples → train + test.
+
+### Hyperparameters
+| Parameter | Value |
+|---|---|
+| Batch size | 32 |
+| Initial learning rate | 1e-3 (Adam) |
+| Epochs (full run) | 50 (EarlyStopping patience=10) |
+| ReduceLROnPlateau | factor=0.5, patience=5, min_lr=1e-6 |
+| ArcFace margin m | 0.5 |
+| ArcFace scale s | 64.0 |
+| Augmentation | RandomRotation ±5% (train only) |
+
+### Training Commands
+```bash
+python -m src.models.train_softmax   # saves models/softmax_best.h5
+python -m src.models.train_arcface   # saves models/arcface_best.h5 + arcface_backbone.h5
+```
+
+### ArcFace Training Wrapper
+The ArcFace training model has **two inputs**: `[image, label_onehot]`.  
+The `_adapt_dataset_for_arcface()` helper remaps `(x, y)` datasets to `([x, y], y)` for Keras's `model.fit()`.  
+For inference, only the backbone (`arcface_backbone.h5`) is needed.
 
 ---
 
