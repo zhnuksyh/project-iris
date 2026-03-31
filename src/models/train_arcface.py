@@ -24,6 +24,7 @@ Usage
 -----
     python -m src.models.train_arcface
     python -m src.models.train_arcface --epochs 5 --batch_size 16
+    python -m src.models.train_arcface --cpu        # force CPU (disables DirectML)
 """
 
 import argparse
@@ -141,7 +142,11 @@ def get_callbacks():
     ]
 
 
-def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE):
+def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False):
+    if cpu:
+        tf.config.set_visible_devices([], 'GPU')
+        print('[train_arcface] GPU disabled — running on CPU')
+
     print('=' * 60)
     print('IrisNet — ArcFace Training')
     print('=' * 60)
@@ -179,7 +184,8 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs',     type=int, default=EPOCHS)
-    parser.add_argument('--batch_size', type=int, default=BATCH_SIZE)
+    parser.add_argument('--epochs',     type=int,            default=EPOCHS)
+    parser.add_argument('--batch_size', type=int,            default=BATCH_SIZE)
+    parser.add_argument('--cpu',        action='store_true', default=False)
     args = parser.parse_args()
-    train(epochs=args.epochs, batch_size=args.batch_size)
+    train(epochs=args.epochs, batch_size=args.batch_size, cpu=args.cpu)
