@@ -90,12 +90,37 @@ All raw data lives under `data/raw/<subset>/` and is excluded from git.
 ## Project Phase Roadmap
 | Phase | Description | Status |
 |---|---|---|
-| Phase 1 | Environment & Scaffold | In Progress |
-| Phase 2 | Preprocessing Implementation | Pending |
+| Phase 1 | Environment & Scaffold | Complete |
+| Phase 2 | Preprocessing Implementation | Complete |
 | Phase 3 | Model Architecture (IrisNet) | Pending |
 | Phase 4 | Training with ArcFace | Pending |
 | Phase 5 | Baseline (Gabor Filter) | Pending |
 | Phase 6 | Evaluation & Comparison | Pending |
+
+---
+
+## Phase 2 Notes — Preprocessing
+
+### HoughCircles Parameters (final tuned values)
+| Stage | dp | minDist | param1 | param2 range | minRadius | maxRadius |
+|---|---|---|---|---|---|---|
+| Pupil | 1.0 | 50 | 100 | 50 → 5 (step -5) | 10 | 80 |
+| Iris  | 1.0 | 50 | 100 | 30 → 5 (step -5) | 80 | 200 |
+
+- Pupil candidate selected by **minimum distance to image centre** (handles off-centre pupils).
+- Iris candidate selected by **minimum distance to detected pupil centre**.
+- Sanity check: `r_iris > r_pupil` AND `centre_distance ≤ max(0.60 × r_iris, 60 px)`.
+
+### Batch Processing Results
+| Subset | Processed | Skipped | Detection Rate |
+|---|---|---|---|
+| CASIA-Iris-Interval | 2 490 | 149 | 94.3% |
+| CASIA-Iris-Lamp     | 10 703 | 5 509 | 66.0% |
+| CASIA-Iris-Thousand | 10 359 | 9 641 | 51.8% |
+| CASIA-Iris-Syn      | 7 074 | 2 926 | 70.7% |
+| **Grand Total**     | **30 626** | **18 225** | **62.7%** |
+
+Lamp/Thousand lower rates are expected — ring illuminator creates circular artefacts that confuse HoughCircles; Thousand has heavy occlusion variation. 30 626 tensors of shape `(128, 128, 1)` float32 saved to `data/processed/`.
 
 ---
 
