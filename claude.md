@@ -93,8 +93,8 @@ All raw data lives under `data/raw/<subset>/` and is excluded from git.
 | Phase 1 | Environment & Scaffold | Complete |
 | Phase 2 | Preprocessing Implementation | Complete |
 | Phase 3 | Model Architecture (IrisNet) | Complete |
-| Phase 4 | Training with ArcFace | Pending |
-| Phase 5 | Baseline (Gabor Filter) | Pending |
+| Phase 4 | Baseline (Gabor Filter) | Complete |
+| Phase 5 | Model Training with ArcFace | Pending |
 | Phase 6 | Evaluation & Comparison | Pending |
 
 ---
@@ -148,6 +148,31 @@ Lamp/Thousand lower rates are expected — ring illuminator creates circular art
 - Input: `(embeddings, labels_onehot)` → output: scaled logits for cross-entropy
 
 **NumPy constraint:** TF 2.10 requires NumPy < 2.0. Pin `numpy<2.0` in any new environment.
+
+---
+
+## Phase 4 Notes — Gabor Filter Baseline
+
+### Filter Bank Configuration
+| Parameter | Value |
+|---|---|
+| Scales | 4 |
+| Orientations | 8 |
+| Total filter pairs | 32 (real + imaginary quadrature per pair) |
+| Kernel sizes | 9, 13, 17, 23 px |
+| Spatial wavelengths λ | 5, 8, 11, 15 px |
+| Subsampling factor | 2 (responses sampled at 64×64) |
+| IrisCode length | 262,144 bits (32 × 2 × 64 × 64) |
+
+**Key implementation detail:** Input images must be mean-centred before convolution (`img = img - img.mean()`). Without this, the `[0,1]` pixel range introduces a positive DC bias, pushing ~75% of bits to 1 and destroying discriminability.
+
+### Verified Hamming Distance Results
+| Pair type | HD | Interpretation |
+|---|---|---|
+| Genuine (subject 013/L, sessions 1 vs 2) | 0.2117 | Correct match (< 0.32 threshold) |
+| Impostor (subject 050/L vs subject 100/L) | 0.4996 | Correct rejection (> 0.32 threshold) |
+
+Note: Classical Gabor IrisCode is noise-sensitive — genuine pairs can score > 0.32 in practice. This motivates IrisNet, which is expected to achieve much stronger genuine/impostor separation.
 
 ---
 
