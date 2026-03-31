@@ -1,0 +1,8 @@
+tensorflow-cpu==2.10
+tensorflow-directml-plugin
+opencv-python
+numpy
+pandas
+matplotlib
+scikit-learn
+jupyter
