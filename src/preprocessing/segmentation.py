@@ -69,7 +69,11 @@ def segment_iris(blurred_image: np.ndarray) -> Optional[dict]:
         On success: {"center": (cx, cy), "r_pupil": float, "r_iris": float}
         On failure (no valid circles found): None
     """
-    def _detect(image, dp, min_dist, p1, p2_start, p2_min, p2_step, min_r, max_r):
+    h, w = blurred_image.shape[:2]
+    img_cx, img_cy = w / 2.0, h / 2.0   # image centre — used as prior
+
+    def _detect_all(image, dp, min_dist, p1, p2_start, p2_min, p2_step, min_r, max_r):
+        """Run HoughCircles with a fallback loop on param2; return all circles or None."""
         for p2 in range(p2_start, p2_min - 1, p2_step):
             circles = cv2.HoughCircles(
                 image,
@@ -85,33 +89,45 @@ def segment_iris(blurred_image: np.ndarray) -> Optional[dict]:
                 return np.round(circles[0, :]).astype(int)
         return None
 
-    # --- Phase 1: Pupil ---
-    pupil_circles = _detect(
+    # --- Phase 1: Pupil (select circle closest to image centre) ---
+    pupil_candidates = _detect_all(
         blurred_image,
-        dp=1.5, min_dist=50,
-        p1=200, p2_start=50, p2_min=15, p2_step=-5,
+        dp=1.0, min_dist=50,
+        p1=100, p2_start=50, p2_min=5, p2_step=-5,
         min_r=10, max_r=80,
     )
-    if pupil_circles is None:
+    if pupil_candidates is None:
         return None
 
-    px, py, r_pupil = pupil_circles[0]
-
-    # --- Phase 2: Iris ---
-    iris_circles = _detect(
-        blurred_image,
-        dp=1.5, min_dist=50,
-        p1=100, p2_start=30, p2_min=10, p2_step=-5,
-        min_r=80, max_r=150,
+    dists_to_centre = np.sqrt(
+        (pupil_candidates[:, 0] - img_cx) ** 2 +
+        (pupil_candidates[:, 1] - img_cy) ** 2
     )
-    if iris_circles is None:
+    px, py, r_pupil = pupil_candidates[np.argmin(dists_to_centre)]
+
+    # --- Phase 2: Iris (select circle closest to pupil centre) ---
+    # maxRadius=200 covers both 280x320 (r~90-130) and 480x640 (r~100-180) images
+    iris_candidates = _detect_all(
+        blurred_image,
+        dp=1.0, min_dist=50,
+        p1=100, p2_start=30, p2_min=5, p2_step=-5,
+        min_r=80, max_r=200,
+    )
+    if iris_candidates is None:
         return None
 
-    ix, iy, r_iris = iris_circles[0]
+    dists_to_pupil = np.sqrt(
+        (iris_candidates[:, 0] - px) ** 2 +
+        (iris_candidates[:, 1] - py) ** 2
+    )
+    ix, iy, r_iris = iris_candidates[np.argmin(dists_to_pupil)]
 
     # --- Sanity check ---
-    center_dist = np.sqrt((px - ix) ** 2 + (py - iy) ** 2)
-    if r_iris <= r_pupil or center_dist > 25:
+    # Allow centre offset up to 60% of iris radius (handles Lamp illumination variance
+    # where the ring illuminator shifts apparent iris centre), floor of 60 px.
+    center_dist = float(np.sqrt((px - ix) ** 2 + (py - iy) ** 2))
+    max_offset   = max(0.60 * r_iris, 60.0)
+    if r_iris <= r_pupil or center_dist > max_offset:
         return None
 
     # Use pupil centre as the canonical centre (more stable)
