@@ -13,6 +13,7 @@ __pycache__/
 # Dataset directories (never commit raw or processed image data)
 data/raw/
 data/processed/
+data/processed.zip
 
 # OS artifacts
 .DS_Store
@@ -29,3 +30,11 @@ runs/
 outputs/
 checkpoints/
 saved_models/
+
+# Trained model weights (copied back manually after training on Linux)
+models/*.h5
+models/*.json
+
+# Local reference docs (personal notes, not for repo)
+PROJECT_STATUS.md
+HANDOVER.md
