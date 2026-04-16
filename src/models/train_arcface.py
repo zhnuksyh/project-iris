@@ -46,7 +46,7 @@ ARCFACE_MARGIN = 0.5
 ARCFACE_SCALE  = 64.0
 
 CHECKPOINT_PATH = 'models/arcface_best.h5'
-BACKBONE_PATH   = 'models/arcface_backbone.h5'
+BACKBONE_PATH   = 'models/arcface_backbone.weights.h5'
 HISTORY_PATH    = 'models/arcface_history.json'
 
 
@@ -99,6 +99,7 @@ def build_arcface_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM,
         # ArcFace outputs raw scaled logits → from_logits=True
         loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True),
         metrics=['accuracy'],
+        jit_compile=False,
     )
     return training_model, backbone
 
@@ -111,7 +112,7 @@ def _adapt_dataset_for_arcface(ds: tf.data.Dataset):
     target is the same label_onehot (for cross-entropy).
     """
     return ds.map(
-        lambda x, y: ([x, y], y),
+        lambda x, y: ({'image': x, 'label_onehot': y}, y),
         num_parallel_calls=tf.data.AUTOTUNE,
     )
 

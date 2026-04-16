@@ -70,6 +70,7 @@ def build_softmax_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM):
         optimizer=tf.keras.optimizers.Adam(learning_rate=LR_INITIAL),
         loss=tf.keras.losses.CategoricalCrossentropy(),
         metrics=['accuracy'],
+        jit_compile=False,
     )
     return model
 
