@@ -167,6 +167,17 @@ def _make_tf_dataset(
     if augment:
         augmentor = tf.keras.Sequential([
             tf.keras.layers.RandomRotation(factor=0.05, fill_mode='reflect'),
+            tf.keras.layers.RandomZoom(
+                height_factor=(-0.05, 0.05),
+                width_factor=(-0.05, 0.05),
+                fill_mode='reflect',
+            ),
+            tf.keras.layers.RandomTranslation(
+                height_factor=0.03,
+                width_factor=0.03,
+                fill_mode='reflect',
+            ),
+            tf.keras.layers.GaussianNoise(0.01),
         ])
         ds = ds.map(
             lambda x, y: (augmentor(x, training=True), y),
@@ -188,6 +199,7 @@ def build_datasets(
     processed_root: str = 'data/processed',
     batch_size: int = 32,
     test_split_path: str = TEST_SPLIT_PATH,
+    min_samples: int = 1,
 ):
     """Discover data, split, and return three tf.data.Dataset objects.
 
@@ -198,6 +210,8 @@ def build_datasets(
         processed_root:  path to data/processed/
         batch_size:      batch size for all three splits
         test_split_path: where to write/read the test split JSON file
+        min_samples:     minimum images per identity to include (default 1 =
+                         keep all; set to 2 for ArcFace to exclude singletons)
 
     Returns:
         (train_ds, val_ds, test_ds, num_classes)
@@ -205,6 +219,15 @@ def build_datasets(
     global NUM_CLASSES
 
     _, _, label_to_idx, identity_files = _discover(processed_root)
+
+    # Filter out identities with fewer than min_samples images
+    if min_samples > 1:
+        identity_files = {k: v for k, v in identity_files.items()
+                          if len(v) >= min_samples}
+        sorted_identities = sorted(identity_files.keys())
+        label_to_idx = {ident: idx for idx, ident in enumerate(sorted_identities)}
+        print(f'[data_loader] Filtered to identities with >= {min_samples} samples')
+
     num_classes = len(label_to_idx)
     NUM_CLASSES = num_classes
 

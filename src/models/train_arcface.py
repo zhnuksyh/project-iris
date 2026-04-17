@@ -14,16 +14,24 @@ the angular margin only to the true-class angle).  This means the model has
 TWO inputs: [image, label_onehot].  A thin wrapper model is built to fuse
 them for Keras's model.fit() API.
 
+The training uses:
+  - SGD with momentum (0.9) and weight decay (5e-4) instead of Adam, to
+    prevent the backbone from collapsing while the W-matrix absorbs all
+    discriminative capacity.
+  - Margin/scale annealing: warmup with m=0 s=16, then linear ramp to
+    m=0.5 s=64 over RAMPUP_EPOCHS.
+  - Deterministic step LR decay at epochs 40/60/80 (standard ArcFace schedule).
+
 Saved artefacts
 ---------------
-  models/arcface_best.h5       Best full-model checkpoint (backbone + head)
-  models/arcface_backbone.h5   Backbone-only weights (used for inference / Phase 6)
-  models/arcface_history.json  Training history
+  models/arcface_best.h5             Best full-model checkpoint (backbone + head)
+  models/arcface_backbone.weights.h5 Backbone-only weights (used for inference)
+  models/arcface_history.json        Training history
 
 Usage
 -----
     python -m src.models.train_arcface
-    python -m src.models.train_arcface --epochs 5 --batch_size 16
+    python -m src.models.train_arcface --epochs 100 --batch_size 64
     python -m src.models.train_arcface --cpu        # force CPU (disables DirectML)
 """
 
@@ -38,20 +46,60 @@ from src.models.arcface_loss import ArcFaceLayer
 from src.utils.data_loader import build_datasets
 
 # ── Hyper-parameters ──────────────────────────────────────────────────────────
-EPOCHS        = 50
-BATCH_SIZE    = 32
-LR_INITIAL    = 1e-3
-EMBEDDING_DIM = 512
-ARCFACE_MARGIN = 0.5
-ARCFACE_SCALE  = 64.0
+EPOCHS         = 50
+BATCH_SIZE     = 64
+LR_INITIAL     = 0.01      # SGD base LR
+EMBEDDING_DIM  = 512
+ARCFACE_MARGIN = 0.5       # target margin (annealed from 0.0)
+ARCFACE_SCALE  = 64.0      # target scale  (annealed from 16.0)
+WARMUP_EPOCHS  = 5         # softmax-only warmup (m=0, s=16)
+RAMPUP_EPOCHS  = 15        # linear ramp m: 0→0.5, s: 16→64
+MIN_SAMPLES    = 2         # exclude single-sample classes
 
 CHECKPOINT_PATH = 'models/arcface_best.h5'
 BACKBONE_PATH   = 'models/arcface_backbone.weights.h5'
 HISTORY_PATH    = 'models/arcface_history.json'
 
 
-def build_arcface_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM,
-                        margin: float = ARCFACE_MARGIN, scale: float = ARCFACE_SCALE):
+# ── Margin / Scale Annealing ─────────────────────────────────────────────────
+
+class MarginScaleAnnealingCallback(tf.keras.callbacks.Callback):
+    """Anneal ArcFace margin and scale during training.
+
+    Schedule:
+      - Warmup  (epoch 0 .. warmup-1):  m = 0.0,           s = initial_scale
+      - Ramp-up (warmup .. warmup+ramp): m linearly → target_m, s linearly → target_s
+      - Full    (after ramp):            m = target_m,      s = target_s
+    """
+
+    def __init__(self, warmup_epochs, rampup_epochs,
+                 target_margin, target_scale, initial_scale=16.0):
+        super().__init__()
+        self.warmup_epochs = warmup_epochs
+        self.rampup_epochs = rampup_epochs
+        self.target_margin = target_margin
+        self.target_scale = target_scale
+        self.initial_scale = initial_scale
+
+    def on_epoch_begin(self, epoch, logs=None):
+        arcface = self.model.get_layer('arcface')
+        if epoch < self.warmup_epochs:
+            m, s = 0.0, self.initial_scale
+        elif epoch < self.warmup_epochs + self.rampup_epochs:
+            progress = (epoch - self.warmup_epochs) / self.rampup_epochs
+            m = self.target_margin * progress
+            s = self.initial_scale + (self.target_scale - self.initial_scale) * progress
+        else:
+            m, s = self.target_margin, self.target_scale
+
+        arcface.margin_var.assign(m)
+        arcface.scale_var.assign(s)
+        if epoch < self.warmup_epochs + self.rampup_epochs + 1 or epoch % 10 == 0:
+            print(f'  [anneal] epoch {epoch}: margin={m:.3f}, scale={s:.1f}')
+
+
+def build_arcface_model(num_classes: int, num_train_samples: int,
+                        embedding_dim: int = EMBEDDING_DIM):
     """Build and compile the full ArcFace training model.
 
     Architecture (training):
@@ -60,10 +108,9 @@ def build_arcface_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM,
         label_onehot        ─┘
 
     Args:
-        num_classes:   number of identity classes
-        embedding_dim: IrisNet embedding dimension
-        margin:        ArcFace angular margin m (default 0.5)
-        scale:         ArcFace feature scale s (default 64.0)
+        num_classes:      number of identity classes
+        num_train_samples: number of training samples (for LR schedule)
+        embedding_dim:    IrisNet embedding dimension
 
     Returns:
         (training_model, backbone)
@@ -79,11 +126,12 @@ def build_arcface_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM,
 
     embeddings = backbone(img_input, training=True)
 
+    # Start with m=0, s=16 — annealed by MarginScaleAnnealingCallback
     arcface_layer = ArcFaceLayer(
         num_classes=num_classes,
         embedding_dim=embedding_dim,
-        margin=margin,
-        scale=scale,
+        margin=0.0,
+        scale=16.0,
         name='arcface',
     )
     logits = arcface_layer([embeddings, label_input])
@@ -94,8 +142,28 @@ def build_arcface_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM,
         name='IrisNet_ArcFace',
     )
 
+    # Step LR decay at epochs 25/35/45 (scaled for 50-epoch schedule)
+    steps_per_epoch = num_train_samples // BATCH_SIZE + 1
+    lr_schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+        boundaries=[
+            steps_per_epoch * 25,
+            steps_per_epoch * 35,
+            steps_per_epoch * 45,
+        ],
+        values=[
+            LR_INITIAL,
+            LR_INITIAL * 0.1,
+            LR_INITIAL * 0.01,
+            LR_INITIAL * 0.001,
+        ],
+    )
+
     training_model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=LR_INITIAL),
+        optimizer=tf.keras.optimizers.SGD(
+            learning_rate=lr_schedule,
+            momentum=0.9,
+            weight_decay=5e-4,
+        ),
         # ArcFace outputs raw scaled logits → from_logits=True
         loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True),
         metrics=['accuracy'],
@@ -120,26 +188,25 @@ def _adapt_dataset_for_arcface(ds: tf.data.Dataset):
 def get_callbacks():
     os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
     return [
+        MarginScaleAnnealingCallback(
+            warmup_epochs=WARMUP_EPOCHS,
+            rampup_epochs=RAMPUP_EPOCHS,
+            target_margin=ARCFACE_MARGIN,
+            target_scale=ARCFACE_SCALE,
+            initial_scale=16.0,
+        ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=CHECKPOINT_PATH,
-            monitor='val_loss',
+            monitor='val_accuracy',
+            mode='max',
             save_best_only=True,
             save_weights_only=False,
             verbose=1,
         ),
-        tf.keras.callbacks.EarlyStopping(
-            monitor='val_loss',
-            patience=10,
-            restore_best_weights=True,
-            verbose=1,
-        ),
-        tf.keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss',
-            factor=0.5,
-            patience=5,
-            min_lr=1e-6,
-            verbose=1,
-        ),
+        # No EarlyStopping — the margin/scale ramp-up causes val_accuracy
+        # to drop temporarily, which misleads patience-based stopping.
+        # Instead, rely on the full 100-epoch schedule with LR step decay
+        # at epochs 40/60/80 (standard ArcFace protocol).
     ]
 
 
@@ -149,18 +216,27 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False)
         print('[train_arcface] GPU disabled — running on CPU')
 
     print('=' * 60)
-    print('IrisNet — ArcFace Training')
+    print('IrisNet — ArcFace Training (v2: warmup + SGD)')
     print('=' * 60)
 
-    train_ds, val_ds, _, num_classes = build_datasets(batch_size=batch_size)
+    train_ds, val_ds, _, num_classes = build_datasets(
+        batch_size=batch_size, min_samples=MIN_SAMPLES,
+    )
+    # Count training samples for LR schedule boundaries
+    num_train_samples = sum(1 for _ in train_ds.unbatch())
     print(f'Classes: {num_classes}  |  Batch size: {batch_size}  |  Epochs: {epochs}')
-    print(f'ArcFace: margin={ARCFACE_MARGIN}, scale={ARCFACE_SCALE}')
+    print(f'Train samples: {num_train_samples}  |  Min samples/class: {MIN_SAMPLES}')
+    print(f'ArcFace target: margin={ARCFACE_MARGIN}, scale={ARCFACE_SCALE}')
+    print(f'Warmup: {WARMUP_EPOCHS} epochs (m=0, s=16)  |  Ramp-up: {RAMPUP_EPOCHS} epochs')
+    print(f'Optimizer: SGD(lr={LR_INITIAL}, momentum=0.9, wd=5e-4)')
 
     # Wrap datasets so both inputs and targets are provided
     train_ds_af = _adapt_dataset_for_arcface(train_ds)
     val_ds_af   = _adapt_dataset_for_arcface(val_ds)
 
-    training_model, backbone = build_arcface_model(num_classes)
+    training_model, backbone = build_arcface_model(
+        num_classes, num_train_samples=num_train_samples,
+    )
     training_model.summary()
 
     history = training_model.fit(
