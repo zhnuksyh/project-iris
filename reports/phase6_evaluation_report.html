@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Iris — Evaluation Dashboard</title>
+<style>
+  :root {
+    --blue: #2196F3; --blue-bg: #e3f2fd; --blue-dark: #1565c0;
+    --orange: #FF9800; --orange-bg: #fff3e0; --orange-dark: #e65100;
+    --green: #4CAF50; --green-bg: #e8f5e9; --green-dark: #2e7d32;
+    --red: #ef5350; --red-bg: #ffebee;
+    --dark: #1a1a2e; --darker: #0f0f1a; --light: #f8f9fa;
+    --card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f0f2f5; color: #333; }
+
+  /* ── Header ─────────────────────────────────────────────────────────── */
+  .header {
+    background: linear-gradient(135deg, var(--dark) 0%, #16213e 100%);
+    color: #fff; padding: 2rem 2rem 1.5rem; text-align: center;
+  }
+  .header h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .header .subtitle { font-size: 0.95rem; opacity: 0.7; }
+
+  /* ── Layout ─────────────────────────────────────────────────────────── */
+  .dashboard { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+  .row { display: grid; gap: 1.5rem; margin-bottom: 1.5rem; }
+  .row-3 { grid-template-columns: repeat(3, 1fr); }
+  .row-2 { grid-template-columns: repeat(2, 1fr); }
+  .row-1 { grid-template-columns: 1fr; }
+
+  /* ── Cards ──────────────────────────────────────────────────────────── */
+  .card {
+    background: #fff; border-radius: var(--radius);
+    box-shadow: var(--card-shadow); overflow: hidden;
+  }
+  .card-header {
+    padding: 0.75rem 1.25rem; font-weight: 600; font-size: 0.85rem;
+    text-transform: uppercase; letter-spacing: 0.5px; color: #fff;
+    background: var(--dark);
+  }
+  .card-body { padding: 1.25rem; }
+
+  /* ── KPI Metric Cards ──────────────────────────────────────────────── */
+  .kpi {
+    background: #fff; border-radius: var(--radius);
+    box-shadow: var(--card-shadow); padding: 1.5rem 1rem;
+    text-align: center; position: relative; overflow: hidden;
+  }
+  .kpi::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 4px;
+  }
+  .kpi.arcface::before { background: var(--blue); }
+  .kpi.softmax::before { background: var(--orange); }
+  .kpi.gabor::before { background: var(--green); }
+
+  .kpi .system-label {
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
+    font-weight: 700; margin-bottom: 0.5rem;
+  }
+  .kpi.arcface .system-label { color: var(--blue-dark); }
+  .kpi.softmax .system-label { color: var(--orange-dark); }
+  .kpi.gabor .system-label { color: var(--green-dark); }
+
+  .kpi .value { font-size: 2.4rem; font-weight: 800; color: var(--dark); line-height: 1.1; }
+  .kpi .metric-name { font-size: 0.8rem; color: #888; margin-top: 0.25rem; }
+
+  .kpi-sub { display: flex; justify-content: center; gap: 1.5rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #eee; }
+  .kpi-sub .item { text-align: center; }
+  .kpi-sub .item .val { font-size: 1.1rem; font-weight: 700; color: var(--dark); }
+  .kpi-sub .item .lbl { font-size: 0.7rem; color: #999; }
+
+  /* ── Winner badge ──────────────────────────────────────────────────── */
+  .winner { position: relative; }
+  .winner::after {
+    content: 'BEST'; position: absolute; top: 12px; right: -24px;
+    background: var(--blue); color: #fff; font-size: 0.6rem; font-weight: 800;
+    padding: 2px 28px; transform: rotate(45deg); letter-spacing: 1px;
+  }
+
+  /* ── Comparison Table ──────────────────────────────────────────────── */
+  .comp-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .comp-table th {
+    background: var(--dark); color: #fff; padding: 0.6rem 0.75rem;
+    text-align: left; font-weight: 600; font-size: 0.8rem;
+  }
+  .comp-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #eee; }
+  .comp-table tr:last-child td { border-bottom: none; }
+  .comp-table .best-val { color: var(--blue-dark); font-weight: 700; }
+  .comp-table .metric-label { font-weight: 600; color: #555; }
+
+  /* ── Figure containers ─────────────────────────────────────────────── */
+  .fig-container { text-align: center; }
+  .fig-container img {
+    max-width: 100%; border-radius: 6px;
+    border: 1px solid #e8e8e8;
+  }
+  .fig-caption {
+    font-size: 0.78rem; color: #888; margin-top: 0.5rem;
+    font-style: italic; line-height: 1.4;
+  }
+
+  /* ── Embedding diagnostics ─────────────────────────────────────────── */
+  .diag-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
+  .diag-cell {
+    padding: 0.75rem; text-align: center;
+    border-right: 1px solid #eee; border-bottom: 1px solid #eee;
+  }
+  .diag-cell:nth-child(3n) { border-right: none; }
+  .diag-cell:nth-last-child(-n+3) { border-bottom: none; }
+  .diag-cell .diag-label { font-size: 0.7rem; color: #999; text-transform: uppercase; letter-spacing: 0.5px; }
+  .diag-cell .diag-val { font-size: 1.15rem; font-weight: 700; color: var(--dark); margin-top: 0.15rem; }
+
+  /* ── Info bar ───────────────────────────────────────────────────────── */
+  .info-bar {
+    display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;
+    background: #fff; border-radius: var(--radius); box-shadow: var(--card-shadow);
+    padding: 1rem 1.5rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: #555;
+  }
+  .info-bar .info-item { display: flex; align-items: center; gap: 0.4rem; }
+  .info-bar .info-val { font-weight: 700; color: var(--dark); }
+
+  /* ── Section labels ─────────────────────────────────────────────────── */
+  .section-label {
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.5px;
+    font-weight: 700; color: #aaa; margin-bottom: 0.75rem; margin-top: 0.5rem;
+  }
+
+  /* ── Footer ─────────────────────────────────────────────────────────── */
+  .footer {
+    text-align: center; padding: 1.5rem; font-size: 0.78rem; color: #aaa;
+  }
+
+  /* ── Responsive ─────────────────────────────────────────────────────── */
+  @media (max-width: 800px) {
+    .row-3 { grid-template-columns: 1fr; }
+    .row-2 { grid-template-columns: 1fr; }
+    .diag-grid { grid-template-columns: 1fr; }
+    .kpi-sub { flex-direction: column; gap: 0.5rem; }
+  }
+  @media print {
+    body { background: #fff; }
+    .card, .kpi { box-shadow: none; border: 1px solid #ddd; }
+    .header { background: var(--dark); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- HEADER -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="header">
+  <h1>Project Iris &mdash; Evaluation Dashboard</h1>
+  <div class="subtitle">Iris Recognition System Comparison &middot; CASIA-IrisV4 &middot; April 2026</div>
+</div>
+
+<div class="dashboard">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TEST SET INFO BAR -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="info-bar">
+  <div class="info-item">Test Samples: <span class="info-val">4,364</span></div>
+  <div class="info-item">Identities: <span class="info-val">3,960</span></div>
+  <div class="info-item">Genuine Pairs: <span class="info-val">405</span></div>
+  <div class="info-item">Impostor Pairs: <span class="info-val">40,500</span></div>
+  <div class="info-item">Ratio: <span class="info-val">1:100</span></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- KPI CARDS — EER -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Equal Error Rate (EER)</div>
+<div class="row row-3">
+  <div class="kpi arcface winner">
+    <div class="system-label">ArcFace</div>
+    <div class="value">3.46%</div>
+    <div class="metric-name">Equal Error Rate</div>
+    <div class="kpi-sub">
+      <div class="item"><div class="val">93.33%</div><div class="lbl">TAR @ FAR=1%</div></div>
+      <div class="item"><div class="val">52.10%</div><div class="lbl">TAR @ FAR=0.1%</div></div>
+    </div>
+  </div>
+  <div class="kpi softmax">
+    <div class="system-label">Softmax</div>
+    <div class="value">4.20%</div>
+    <div class="metric-name">Equal Error Rate</div>
+    <div class="kpi-sub">
+      <div class="item"><div class="val">93.09%</div><div class="lbl">TAR @ FAR=1%</div></div>
+      <div class="item"><div class="val">82.72%</div><div class="lbl">TAR @ FAR=0.1%</div></div>
+    </div>
+  </div>
+  <div class="kpi gabor">
+    <div class="system-label">Gabor</div>
+    <div class="value">26.67%</div>
+    <div class="metric-name">Equal Error Rate</div>
+    <div class="kpi-sub">
+      <div class="item"><div class="val">42.72%</div><div class="lbl">TAR @ FAR=1%</div></div>
+      <div class="item"><div class="val">29.14%</div><div class="lbl">TAR @ FAR=0.1%</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- COMPARISON TABLE -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="row row-1">
+  <div class="card">
+    <div class="card-header">Full Comparison</div>
+    <div class="card-body" style="padding:0;">
+      <table class="comp-table">
+        <tr><th>Metric</th><th>ArcFace</th><th>Softmax</th><th>Gabor</th></tr>
+        <tr><td class="metric-label">EER (%)</td><td class="best-val">3.46%</td><td>4.20%</td><td>26.67%</td></tr>
+        <tr><td class="metric-label">TAR @ FAR=1%</td><td class="best-val">93.33%</td><td>93.09%</td><td>42.72%</td></tr>
+        <tr><td class="metric-label">TAR @ FAR=0.1%</td><td>52.10%</td><td class="best-val">82.72%</td><td>29.14%</td></tr>
+        <tr><td class="metric-label">EER Threshold</td><td>0.3172</td><td>0.3594</td><td>0.6112</td></tr>
+        <tr><td class="metric-label">Genuine Mean Score</td><td>0.7523</td><td>0.7720</td><td>0.6863</td></tr>
+        <tr><td class="metric-label">Impostor Mean Score</td><td>0.0140</td><td>0.0380</td><td>0.5712</td></tr>
+        <tr><td class="metric-label">Score Gap</td><td class="best-val">0.7383</td><td>0.7340</td><td>0.1151</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- ROC + DET -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Verification Performance Curves</div>
+<div class="row row-2">
+  <div class="card">
+    <div class="card-header">ROC Curves</div>
+    <div class="card-body fig-container">
+      <img src="../figures/roc_curves.png" alt="ROC Curves">
+      <div class="fig-caption">TAR vs FAR. ArcFace (blue) and Softmax (orange) achieve near-perfect ROC performance, far above the Gabor baseline (green).</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">DET Curves</div>
+    <div class="card-body fig-container">
+      <img src="../figures/det_curves.png" alt="DET Curves">
+      <div class="fig-caption">Probit-scaled FRR vs FAR (standard biometric format). Lower-left is better. Softmax is slightly better at very low FAR (&lt;0.2%).</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SCORE DISTRIBUTIONS -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Score Distributions</div>
+<div class="row row-1">
+  <div class="card">
+    <div class="card-header">Genuine vs Impostor Score Distributions</div>
+    <div class="card-body fig-container">
+      <img src="../figures/score_distributions.png" alt="Score Distributions">
+      <div class="fig-caption">Genuine (blue) vs impostor (red) score histograms per system. Dashed line = EER threshold. ArcFace and Softmax show clear separation; Gabor shows heavy overlap.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- EMBEDDING DIAGNOSTICS -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Embedding Quality Diagnostics</div>
+<div class="row row-2">
+  <div class="card">
+    <div class="card-header" style="background: var(--blue-dark);">ArcFace Embeddings</div>
+    <div class="card-body" style="padding:0;">
+      <div class="diag-grid">
+        <div class="diag-cell"><div class="diag-label">Genuine Mean</div><div class="diag-val">0.7523</div></div>
+        <div class="diag-cell"><div class="diag-label">Impostor Mean</div><div class="diag-val">0.0140</div></div>
+        <div class="diag-cell"><div class="diag-label">Gap</div><div class="diag-val" style="color:var(--blue-dark)">0.7383</div></div>
+        <div class="diag-cell"><div class="diag-label">Std / dim</div><div class="diag-val">0.0437</div></div>
+        <div class="diag-cell"><div class="diag-label">Embedding Dim</div><div class="diag-val">512</div></div>
+        <div class="diag-cell"><div class="diag-label">Status</div><div class="diag-val" style="color:var(--green)">Healthy</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header" style="background: var(--orange-dark);">Softmax Embeddings</div>
+    <div class="card-body" style="padding:0;">
+      <div class="diag-grid">
+        <div class="diag-cell"><div class="diag-label">Genuine Mean</div><div class="diag-val">0.7720</div></div>
+        <div class="diag-cell"><div class="diag-label">Impostor Mean</div><div class="diag-val">0.0380</div></div>
+        <div class="diag-cell"><div class="diag-label">Gap</div><div class="diag-val" style="color:var(--orange-dark)">0.7340</div></div>
+        <div class="diag-cell"><div class="diag-label">Std / dim</div><div class="diag-val">0.0433</div></div>
+        <div class="diag-cell"><div class="diag-label">Embedding Dim</div><div class="diag-val">512</div></div>
+        <div class="diag-cell"><div class="diag-label">Status</div><div class="diag-val" style="color:var(--green)">Healthy</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TRAINING CURVES -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Training History</div>
+<div class="row row-1">
+  <div class="card">
+    <div class="card-header">Training Curves &mdash; Loss &amp; Accuracy</div>
+    <div class="card-body fig-container">
+      <img src="../figures/training_curves.png" alt="Training Curves">
+      <div class="fig-caption">Softmax converges smoothly to 97.8% train accuracy. ArcFace shows characteristic loss spikes during margin ramp-up (epochs 5&ndash;19), with recovery after LR drops at epochs 25, 35, and 45.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- t-SNE -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Embedding Space Visualization (t-SNE)</div>
+<div class="row row-2">
+  <div class="card">
+    <div class="card-header" style="background: var(--blue-dark);">ArcFace &mdash; t-SNE (Top 20 Identities)</div>
+    <div class="card-body fig-container">
+      <img src="../figures/tsne_arcface.png" alt="t-SNE ArcFace">
+      <div class="fig-caption">Same-identity samples cluster tightly, demonstrating strong intra-class compactness from angular margin training.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header" style="background: var(--orange-dark);">Softmax &mdash; t-SNE (Top 20 Identities)</div>
+    <div class="card-body fig-container">
+      <img src="../figures/tsne_softmax.png" alt="t-SNE Softmax">
+      <div class="fig-caption">Similar clustering to ArcFace, confirming both backbones learn discriminative identity features.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- TRAINING CONFIG SUMMARY -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Training Configuration</div>
+<div class="row row-2">
+  <div class="card">
+    <div class="card-header" style="background: var(--blue-dark);">ArcFace Config</div>
+    <div class="card-body" style="padding:0;">
+      <table class="comp-table">
+        <tr><td class="metric-label">Optimizer</td><td>SGD (lr=0.01, momentum=0.9, wd=5e-4)</td></tr>
+        <tr><td class="metric-label">Batch Size</td><td>64</td></tr>
+        <tr><td class="metric-label">Epochs</td><td>50</td></tr>
+        <tr><td class="metric-label">Margin / Scale</td><td>m=0.5, s=64 (annealed from m=0, s=16)</td></tr>
+        <tr><td class="metric-label">Warmup</td><td>5 epochs (pure cosine softmax)</td></tr>
+        <tr><td class="metric-label">Ramp-up</td><td>15 epochs (linear to target)</td></tr>
+        <tr><td class="metric-label">LR Schedule</td><td>Step decay at 25/35/45</td></tr>
+        <tr><td class="metric-label">Classes</td><td>3,960 (min 2 samples/class)</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header" style="background: var(--orange-dark);">Softmax Config</div>
+    <div class="card-body" style="padding:0;">
+      <table class="comp-table">
+        <tr><td class="metric-label">Optimizer</td><td>Adam (lr=1e-3)</td></tr>
+        <tr><td class="metric-label">Batch Size</td><td>32</td></tr>
+        <tr><td class="metric-label">Epochs</td><td>50</td></tr>
+        <tr><td class="metric-label">Loss</td><td>CategoricalCrossentropy</td></tr>
+        <tr><td class="metric-label">Callbacks</td><td>ModelCheckpoint, EarlyStopping, ReduceLR</td></tr>
+        <tr><td class="metric-label">Classes</td><td>4,115 (all identities)</td></tr>
+        <tr><td class="metric-label">Final Train Acc</td><td>97.81%</td></tr>
+        <tr><td class="metric-label">Final Val Acc</td><td>84.56%</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+</div><!-- end .dashboard -->
+
+<div class="footer">
+  Project Iris &mdash; Improving Image Detection for Biometric (Iris) Authentication Systems &middot; April 2026<br>
+  Full report: <code>reports/phase6_evaluation_report.md</code>
+</div>
+
+</body>
+</html>
