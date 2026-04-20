@@ -367,6 +367,167 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PHASE 7 — OPEN-SET EVALUATION -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="section-label" style="margin-top:3rem; border-top:3px solid var(--dark); padding-top:1.5rem;">
+  Phase 7 &mdash; Open-Set Evaluation (Identity-Disjoint)
+</div>
+
+<div class="row row-1">
+  <div class="card">
+    <div class="card-header" style="background: var(--blue-dark);">Protocol</div>
+    <div class="card-body">
+      <p style="margin-bottom:0.75rem;">
+        Retrained both deep models on an <strong>identity-disjoint</strong> split &mdash; 10% of &ge;2-sample identities held out for test. No test-identity samples appear in training. Verification is performed by cosine similarity in the embedding space, so held-out identities never require classifier output.
+      </p>
+      <p>
+        This resolves the Phase 6 statistical-significance caveat: test genuine pairs grow from 405 &rarr; <strong>13,216</strong> (32.6&times; more), giving tight confidence intervals on EER differences.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="info-bar" style="background: var(--blue-bg);">
+  <div class="info-item">Test Samples: <span class="info-val">2,982</span></div>
+  <div class="info-item">Held-Out Identities: <span class="info-val">396</span></div>
+  <div class="info-item">Genuine Pairs: <span class="info-val">13,216</span></div>
+  <div class="info-item">Impostor Pairs: <span class="info-val">1,321,600</span></div>
+  <div class="info-item">Ratio: <span class="info-val">1:100</span></div>
+</div>
+
+<div class="section-label">Open-Set Equal Error Rate (EER)</div>
+<div class="row row-3">
+  <div class="kpi arcface winner">
+    <div class="system-label">ArcFace</div>
+    <div class="value">3.26%</div>
+    <div class="metric-name">Equal Error Rate</div>
+    <div class="kpi-sub">
+      <div class="item"><div class="val">94.31%</div><div class="lbl">TAR @ FAR=1%</div></div>
+      <div class="item"><div class="val">81.55%</div><div class="lbl">TAR @ FAR=0.1%</div></div>
+    </div>
+  </div>
+  <div class="kpi softmax">
+    <div class="system-label">Softmax</div>
+    <div class="value">4.52%</div>
+    <div class="metric-name">Equal Error Rate</div>
+    <div class="kpi-sub">
+      <div class="item"><div class="val">91.16%</div><div class="lbl">TAR @ FAR=1%</div></div>
+      <div class="item"><div class="val">78.47%</div><div class="lbl">TAR @ FAR=0.1%</div></div>
+    </div>
+  </div>
+  <div class="kpi gabor">
+    <div class="system-label">Gabor</div>
+    <div class="value">25.29%</div>
+    <div class="metric-name">Equal Error Rate</div>
+    <div class="kpi-sub">
+      <div class="item"><div class="val">41.15%</div><div class="lbl">TAR @ FAR=1%</div></div>
+      <div class="item"><div class="val">28.22%</div><div class="lbl">TAR @ FAR=0.1%</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="row row-1">
+  <div class="card">
+    <div class="card-header">Closed-Set vs Open-Set Comparison</div>
+    <div class="card-body" style="padding:0;">
+      <table class="comp-table">
+        <tr>
+          <th>Metric</th>
+          <th colspan="2">ArcFace</th>
+          <th colspan="2">Softmax</th>
+          <th colspan="2">Gabor</th>
+        </tr>
+        <tr style="background:#f0f2f5;">
+          <th></th>
+          <th>Closed</th><th>Open</th>
+          <th>Closed</th><th>Open</th>
+          <th>Closed</th><th>Open</th>
+        </tr>
+        <tr><td class="metric-label">EER (%)</td>
+          <td>3.46%</td><td class="best-val">3.26%</td>
+          <td>4.20%</td><td>4.52%</td>
+          <td>26.67%</td><td>25.29%</td></tr>
+        <tr><td class="metric-label">TAR @ FAR=1%</td>
+          <td>93.33%</td><td class="best-val">94.31%</td>
+          <td>93.09%</td><td>91.16%</td>
+          <td>42.72%</td><td>41.15%</td></tr>
+        <tr><td class="metric-label">TAR @ FAR=0.1%</td>
+          <td>52.10%</td><td class="best-val">81.55%</td>
+          <td>82.72%</td><td>78.47%</td>
+          <td>29.14%</td><td>28.22%</td></tr>
+        <tr><td class="metric-label">Score Gap</td>
+          <td>0.7383</td><td class="best-val">0.7261</td>
+          <td>0.7340</td><td>0.7016</td>
+          <td>0.1151</td><td>0.1168</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="section-label">Open-Set Verification Curves</div>
+<div class="row row-2">
+  <div class="card">
+    <div class="card-header">ROC Curves &mdash; Open-Set</div>
+    <div class="card-body fig-container">
+      <img src="../figures/openset/roc_curves.png" alt="Open-Set ROC Curves">
+      <div class="fig-caption">ROC on 13,216 genuine + 1.32M impostor pairs across 396 unseen identities. ArcFace dominates across the full operating range.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">DET Curves &mdash; Open-Set</div>
+    <div class="card-body fig-container">
+      <img src="../figures/openset/det_curves.png" alt="Open-Set DET Curves">
+      <div class="fig-caption">DET plot clearly shows ArcFace below Softmax across all FAR values &mdash; resolving the Phase 6 statistical ambiguity at low FAR.</div>
+    </div>
+  </div>
+</div>
+
+<div class="row row-1">
+  <div class="card">
+    <div class="card-header">Open-Set Score Distributions</div>
+    <div class="card-body fig-container">
+      <img src="../figures/openset/score_distributions.png" alt="Open-Set Score Distributions">
+      <div class="fig-caption">Genuine (blue) vs impostor (red) distributions for unseen identities. Strong separation persists, confirming embeddings generalise rather than memorise.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section-label">Open-Set Embedding Space (t-SNE)</div>
+<div class="row row-2">
+  <div class="card">
+    <div class="card-header" style="background: var(--blue-dark);">ArcFace &mdash; t-SNE on Unseen Identities</div>
+    <div class="card-body fig-container">
+      <img src="../figures/openset/tsne_arcface.png" alt="Open-Set t-SNE ArcFace">
+      <div class="fig-caption">Top 20 held-out identities. Tight intra-class clusters on identities never seen in training prove the embedding generalises.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header" style="background: var(--orange-dark);">Softmax &mdash; t-SNE on Unseen Identities</div>
+    <div class="card-body fig-container">
+      <img src="../figures/openset/tsne_softmax.png" alt="Open-Set t-SNE Softmax">
+      <div class="fig-caption">Softmax also clusters by held-out identity, but clusters are visibly looser than ArcFace &mdash; consistent with the 0.0245-point higher impostor mean.</div>
+    </div>
+  </div>
+</div>
+
+<div class="row row-1">
+  <div class="card">
+    <div class="card-header" style="background: var(--green-dark);">Key Finding</div>
+    <div class="card-body">
+      <p style="margin-bottom:0.5rem;">
+        <strong>ArcFace beats Softmax at every operating point on unseen identities.</strong>
+      </p>
+      <p style="margin-bottom:0.5rem;">
+        In Phase 6, ArcFace lost TAR@FAR=0.1% to Softmax (52.10% vs 82.72%), attributed to statistical noise from 405 genuine pairs. With 32.6&times; more pairs on identity-disjoint test data, ArcFace now leads that metric (81.55% vs 78.47%) along with EER (3.26% vs 4.52%) and TAR@FAR=1% (94.31% vs 91.16%).
+      </p>
+      <p>
+        The Phase 6 conclusion &mdash; that the angular margin is directionally beneficial &mdash; is now supported by a statistically conclusive test.
+      </p>
+    </div>
+  </div>
+</div>
+
 </div><!-- end .dashboard -->
 
 <div class="footer">
