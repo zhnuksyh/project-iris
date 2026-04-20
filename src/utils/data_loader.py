@@ -24,6 +24,16 @@ Design decisions
 * Files are loaded lazily via tf.data.Dataset.map so nothing is pre-loaded
   into RAM.
 * The exact test split is serialised to data/test_split.json for Phase 6.
+
+Split modes
+-----------
+* 'stratified'        (default) — closed-set: per-identity 70/20/10 sample split.
+                      Identities appear in all splits; test samples come from
+                      identities the model has seen during training.
+* 'identity_disjoint' — open-set: partitions identities (not samples). A
+                      disjoint subset of identities is held out entirely for
+                      test; the model never sees these identities during
+                      training. This tests generalisation to unseen subjects.
 """
 
 import json
@@ -44,6 +54,12 @@ SEED = 42
 IMG_SHAPE = (128, 128, 1)
 
 TEST_SPLIT_PATH = 'data/test_split.json'
+OPENSET_SPLIT_PATH = 'data/test_split_openset.json'
+
+# Identity-disjoint split: fraction of identities reserved for test.
+# The remaining identities are split stratified-by-sample into train/val.
+OPENSET_TEST_IDENT_FRAC = 0.10
+OPENSET_VAL_FRAC        = 0.20   # sample-level, on non-test identities
 
 
 # ── 1. Discover all .npy files and assign integer class labels ────────────────
@@ -111,6 +127,71 @@ def _stratified_split(identity_files: dict, label_to_idx: dict, rng: random.Rand
             test.extend( [(f, lbl) for f in test_files])
 
     return train, val, test
+
+
+def _identity_disjoint_split(
+    identity_files: dict,
+    rng: random.Random,
+    test_ident_frac: float = OPENSET_TEST_IDENT_FRAC,
+    val_sample_frac: float = OPENSET_VAL_FRAC,
+):
+    """Partition identities (not samples) for open-set evaluation.
+
+    Rules:
+      * Test identities are picked only from identities with >= 2 samples
+        (need at least 2 per identity to form genuine pairs).
+      * All samples of a test identity go to test (model never sees them).
+      * Remaining identities are sample-split: (1 - val_sample_frac) train,
+        val_sample_frac val. Singleton identities go to train only.
+
+    Returns:
+        train, val, test         — lists of (path, label) tuples
+        train_label_to_idx       — maps identity-string → class index (0..N-1)
+                                   — only non-test identities get indices.
+        test_local_label_to_idx  — maps identity-string → local test index
+                                   — for grouping test samples by identity
+                                   during pair generation (not used by model).
+    """
+    eligible = [ident for ident, files in identity_files.items() if len(files) >= 2]
+    eligible_sorted = sorted(eligible)
+    rng.shuffle(eligible_sorted)
+
+    n_test_id = max(1, round(len(eligible_sorted) * test_ident_frac))
+    test_idents = set(eligible_sorted[:n_test_id])
+    train_pool_idents = sorted(set(identity_files.keys()) - test_idents)
+
+    # Relabel train pool: 0..N-1
+    train_label_to_idx = {ident: idx for idx, ident in enumerate(train_pool_idents)}
+
+    # Relabel test pool with a separate local index 0..M-1 (for pair grouping)
+    test_idents_sorted = sorted(test_idents)
+    test_local_label_to_idx = {ident: idx for idx, ident in enumerate(test_idents_sorted)}
+
+    train, val, test = [], [], []
+
+    # Train/val identities: sample-stratified split
+    for ident in train_pool_idents:
+        files = sorted(identity_files[ident])
+        lbl = train_label_to_idx[ident]
+        n = len(files)
+        shuffled = files[:]
+        rng.shuffle(shuffled)
+
+        if n == 1:
+            train.append((shuffled[0], lbl))
+        else:
+            n_val   = max(1, round(n * val_sample_frac))
+            n_train = n - n_val
+            train.extend((f, lbl) for f in shuffled[:n_train])
+            val.extend(  (f, lbl) for f in shuffled[n_train:])
+
+    # Test identities: all samples go to test, with local labels
+    for ident in test_idents_sorted:
+        files = sorted(identity_files[ident])
+        lbl = test_local_label_to_idx[ident]
+        test.extend((f, lbl) for f in files)
+
+    return train, val, test, train_label_to_idx, test_local_label_to_idx
 
 
 # ── 2. tf.data.Dataset factory ────────────────────────────────────────────────
@@ -198,8 +279,9 @@ NUM_CLASSES: int = 0
 def build_datasets(
     processed_root: str = 'data/processed',
     batch_size: int = 32,
-    test_split_path: str = TEST_SPLIT_PATH,
+    test_split_path: str = None,
     min_samples: int = 1,
+    split_mode: str = 'stratified',
 ):
     """Discover data, split, and return three tf.data.Dataset objects.
 
@@ -209,14 +291,23 @@ def build_datasets(
     Args:
         processed_root:  path to data/processed/
         batch_size:      batch size for all three splits
-        test_split_path: where to write/read the test split JSON file
+        test_split_path: where to write the test split JSON (defaults to
+                         TEST_SPLIT_PATH for 'stratified' and
+                         OPENSET_SPLIT_PATH for 'identity_disjoint')
         min_samples:     minimum images per identity to include (default 1 =
                          keep all; set to 2 for ArcFace to exclude singletons)
+        split_mode:      'stratified' — closed-set, identities in all splits
+                         'identity_disjoint' — open-set, disjoint test identities
 
     Returns:
         (train_ds, val_ds, test_ds, num_classes)
+        For identity_disjoint: num_classes = train identities only.
     """
     global NUM_CLASSES
+
+    if test_split_path is None:
+        test_split_path = (OPENSET_SPLIT_PATH if split_mode == 'identity_disjoint'
+                           else TEST_SPLIT_PATH)
 
     _, _, label_to_idx, identity_files = _discover(processed_root)
 
@@ -228,18 +319,39 @@ def build_datasets(
         label_to_idx = {ident: idx for idx, ident in enumerate(sorted_identities)}
         print(f'[data_loader] Filtered to identities with >= {min_samples} samples')
 
-    num_classes = len(label_to_idx)
-    NUM_CLASSES = num_classes
-
     rng = random.Random(SEED)
-    train_samples, val_samples, test_samples = _stratified_split(
-        identity_files, label_to_idx, rng
-    )
 
-    # Persist test split for Phase 6 evaluation
-    _save_test_split(test_samples, label_to_idx, test_split_path)
+    if split_mode == 'identity_disjoint':
+        (train_samples, val_samples, test_samples,
+         train_label_to_idx, test_local_label_to_idx) = _identity_disjoint_split(
+            identity_files, rng,
+        )
+        num_classes = len(train_label_to_idx)
+        NUM_CLASSES = num_classes
+        n_test_id = len(test_local_label_to_idx)
 
-    print(f'[data_loader] Classes      : {num_classes}')
+        _save_test_split(
+            test_samples, test_local_label_to_idx, test_split_path,
+            num_classes_model=num_classes,
+        )
+        print(f'[data_loader] Mode         : identity_disjoint (open-set)')
+        print(f'[data_loader] Train idents : {num_classes}')
+        print(f'[data_loader] Test idents  : {n_test_id} (disjoint from train)')
+    elif split_mode == 'stratified':
+        num_classes = len(label_to_idx)
+        NUM_CLASSES = num_classes
+        train_samples, val_samples, test_samples = _stratified_split(
+            identity_files, label_to_idx, rng
+        )
+        _save_test_split(
+            test_samples, label_to_idx, test_split_path,
+            num_classes_model=num_classes,
+        )
+        print(f'[data_loader] Mode         : stratified (closed-set)')
+        print(f'[data_loader] Classes      : {num_classes}')
+    else:
+        raise ValueError(f'Unknown split_mode: {split_mode!r}')
+
     print(f'[data_loader] Train samples: {len(train_samples)}')
     print(f'[data_loader] Val   samples: {len(val_samples)}')
     print(f'[data_loader] Test  samples: {len(test_samples)}')
@@ -254,16 +366,29 @@ def build_datasets(
     return train_ds, val_ds, test_ds, num_classes
 
 
-def _save_test_split(test_samples, label_to_idx, path):
-    """Serialise the test split to JSON for reproducible Phase 6 evaluation."""
+def _save_test_split(test_samples, label_to_idx, path, num_classes_model=None):
+    """Serialise the test split to JSON for reproducible Phase 6 evaluation.
+
+    Args:
+        test_samples:      list of (path, label) tuples.
+        label_to_idx:      identity-string → label-index mapping used in samples.
+                           For open-set, this is the local test-identity index.
+        path:              output JSON path.
+        num_classes_model: number of classes the *trained model* has (used for
+                           softmax embedding extraction). Defaults to
+                           len(label_to_idx) for backward compatibility with
+                           the closed-set split.
+    """
     idx_to_label = {v: k for k, v in label_to_idx.items()}
     records = [
         {'path': p, 'label_idx': lbl, 'identity': idx_to_label[lbl]}
         for p, lbl in test_samples
     ]
+    if num_classes_model is None:
+        num_classes_model = len(label_to_idx)
     os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
     with open(path, 'w') as f:
-        json.dump({'num_classes': len(label_to_idx), 'samples': records}, f, indent=2)
+        json.dump({'num_classes': num_classes_model, 'samples': records}, f, indent=2)
     print(f'[data_loader] Test split saved -> {path}  ({len(records)} samples)')
 
 
