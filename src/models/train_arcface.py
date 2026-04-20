@@ -56,9 +56,12 @@ WARMUP_EPOCHS  = 5         # softmax-only warmup (m=0, s=16)
 RAMPUP_EPOCHS  = 15        # linear ramp m: 0→0.5, s: 16→64
 MIN_SAMPLES    = 2         # exclude single-sample classes
 
-CHECKPOINT_PATH = 'models/arcface_best.h5'
-BACKBONE_PATH   = 'models/arcface_backbone.weights.h5'
-HISTORY_PATH    = 'models/arcface_history.json'
+CHECKPOINT_PATH         = 'models/arcface_best.h5'
+BACKBONE_PATH           = 'models/arcface_backbone.weights.h5'
+HISTORY_PATH            = 'models/arcface_history.json'
+OPENSET_CHECKPOINT_PATH = 'models/arcface_openset_best.h5'
+OPENSET_BACKBONE_PATH   = 'models/arcface_openset_backbone.weights.h5'
+OPENSET_HISTORY_PATH    = 'models/arcface_openset_history.json'
 
 
 # ── Margin / Scale Annealing ─────────────────────────────────────────────────
@@ -185,8 +188,8 @@ def _adapt_dataset_for_arcface(ds: tf.data.Dataset):
     )
 
 
-def get_callbacks():
-    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+def get_callbacks(checkpoint_path: str = CHECKPOINT_PATH):
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     return [
         MarginScaleAnnealingCallback(
             warmup_epochs=WARMUP_EPOCHS,
@@ -196,7 +199,7 @@ def get_callbacks():
             initial_scale=16.0,
         ),
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=CHECKPOINT_PATH,
+            filepath=checkpoint_path,
             monitor='val_accuracy',
             mode='max',
             save_best_only=True,
@@ -210,17 +213,24 @@ def get_callbacks():
     ]
 
 
-def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False):
+def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False,
+          openset: bool = False):
     if cpu:
         tf.config.set_visible_devices([], 'GPU')
         print('[train_arcface] GPU disabled — running on CPU')
 
+    checkpoint_path = OPENSET_CHECKPOINT_PATH if openset else CHECKPOINT_PATH
+    backbone_path   = OPENSET_BACKBONE_PATH   if openset else BACKBONE_PATH
+    history_path    = OPENSET_HISTORY_PATH    if openset else HISTORY_PATH
+    split_mode      = 'identity_disjoint'     if openset else 'stratified'
+
     print('=' * 60)
-    print('IrisNet — ArcFace Training (v2: warmup + SGD)')
+    print(f'IrisNet — ArcFace Training  ({"open-set" if openset else "closed-set"})')
     print('=' * 60)
 
     train_ds, val_ds, _, num_classes = build_datasets(
         batch_size=batch_size, min_samples=MIN_SAMPLES,
+        split_mode=split_mode,
     )
     # Count training samples for LR schedule boundaries
     num_train_samples = sum(1 for _ in train_ds.unbatch())
@@ -243,19 +253,19 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False)
         train_ds_af,
         validation_data=val_ds_af,
         epochs=epochs,
-        callbacks=get_callbacks(),
+        callbacks=get_callbacks(checkpoint_path),
         verbose=1,
     )
 
     # Save backbone separately for Phase 6 inference
-    backbone.save_weights(BACKBONE_PATH)
-    print(f'Backbone weights saved -> {BACKBONE_PATH}')
+    backbone.save_weights(backbone_path)
+    print(f'Backbone weights saved -> {backbone_path}')
 
-    os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
-    with open(HISTORY_PATH, 'w') as f:
+    os.makedirs(os.path.dirname(history_path), exist_ok=True)
+    with open(history_path, 'w') as f:
         json.dump(history.history, f, indent=2)
-    print(f'History saved -> {HISTORY_PATH}')
-    print(f'Best full model saved -> {CHECKPOINT_PATH}')
+    print(f'History saved -> {history_path}')
+    print(f'Best full model saved -> {checkpoint_path}')
     return history
 
 
@@ -264,5 +274,8 @@ if __name__ == '__main__':
     parser.add_argument('--epochs',     type=int,            default=EPOCHS)
     parser.add_argument('--batch_size', type=int,            default=BATCH_SIZE)
     parser.add_argument('--cpu',        action='store_true', default=False)
+    parser.add_argument('--openset',    action='store_true', default=False,
+                        help='Train with identity-disjoint open-set split')
     args = parser.parse_args()
-    train(epochs=args.epochs, batch_size=args.batch_size, cpu=args.cpu)
+    train(epochs=args.epochs, batch_size=args.batch_size, cpu=args.cpu,
+          openset=args.openset)

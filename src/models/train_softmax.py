@@ -34,8 +34,10 @@ BATCH_SIZE  = 32
 LR_INITIAL  = 1e-3
 EMBEDDING_DIM = 512
 
-CHECKPOINT_PATH = 'models/softmax_best.h5'
-HISTORY_PATH    = 'models/softmax_history.json'
+CHECKPOINT_PATH         = 'models/softmax_best.h5'
+HISTORY_PATH            = 'models/softmax_history.json'
+OPENSET_CHECKPOINT_PATH = 'models/softmax_openset_best.h5'
+OPENSET_HISTORY_PATH    = 'models/softmax_openset_history.json'
 
 
 def build_softmax_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM):
@@ -75,11 +77,11 @@ def build_softmax_model(num_classes: int, embedding_dim: int = EMBEDDING_DIM):
     return model
 
 
-def get_callbacks():
-    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+def get_callbacks(checkpoint_path: str = CHECKPOINT_PATH):
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     return [
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=CHECKPOINT_PATH,
+            filepath=checkpoint_path,
             monitor='val_loss',
             save_best_only=True,
             save_weights_only=False,
@@ -101,17 +103,25 @@ def get_callbacks():
     ]
 
 
-def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False):
+def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False,
+          openset: bool = False):
     if cpu:
         tf.config.set_visible_devices([], 'GPU')
         print('[train_softmax] GPU disabled — running on CPU')
 
+    checkpoint_path = OPENSET_CHECKPOINT_PATH if openset else CHECKPOINT_PATH
+    history_path    = OPENSET_HISTORY_PATH    if openset else HISTORY_PATH
+    split_mode      = 'identity_disjoint'     if openset else 'stratified'
+    min_samples     = 1  # Softmax handles singleton identities fine
+
     print('=' * 60)
-    print('IrisNet — Softmax Training')
+    print(f'IrisNet — Softmax Training  ({"open-set" if openset else "closed-set"})')
     print('=' * 60)
 
     train_ds, val_ds, _, num_classes = build_datasets(
         batch_size=batch_size,
+        split_mode=split_mode,
+        min_samples=min_samples,
     )
     print(f'Classes: {num_classes}  |  Batch size: {batch_size}  |  Epochs: {epochs}')
 
@@ -122,16 +132,16 @@ def train(epochs: int = EPOCHS, batch_size: int = BATCH_SIZE, cpu: bool = False)
         train_ds,
         validation_data=val_ds,
         epochs=epochs,
-        callbacks=get_callbacks(),
+        callbacks=get_callbacks(checkpoint_path),
         verbose=1,
     )
 
     # Persist history for the notebook
-    os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
-    with open(HISTORY_PATH, 'w') as f:
+    os.makedirs(os.path.dirname(history_path), exist_ok=True)
+    with open(history_path, 'w') as f:
         json.dump(history.history, f, indent=2)
-    print(f'History saved -> {HISTORY_PATH}')
-    print(f'Best model saved -> {CHECKPOINT_PATH}')
+    print(f'History saved -> {history_path}')
+    print(f'Best model saved -> {checkpoint_path}')
     return history
 
 
@@ -140,5 +150,8 @@ if __name__ == '__main__':
     parser.add_argument('--epochs',     type=int,            default=EPOCHS)
     parser.add_argument('--batch_size', type=int,            default=BATCH_SIZE)
     parser.add_argument('--cpu',        action='store_true', default=False)
+    parser.add_argument('--openset',    action='store_true', default=False,
+                        help='Train with identity-disjoint open-set split')
     args = parser.parse_args()
-    train(epochs=args.epochs, batch_size=args.batch_size, cpu=args.cpu)
+    train(epochs=args.epochs, batch_size=args.batch_size, cpu=args.cpu,
+          openset=args.openset)
