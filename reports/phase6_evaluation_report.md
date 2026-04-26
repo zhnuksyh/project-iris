@@ -358,7 +358,7 @@ Both deep learning systems dramatically outperform the Gabor baseline (EER 26.67
 - **Binary quantisation** — loses continuous information
 - **Sensitivity to segmentation accuracy** — misalignment causes bit errors
 - **No capacity for learning** identity-discriminative features
-- **Preprocessing mismatch** — Gabor filters are applied to resized 128×128 images, not the original (64, 512) rubber-sheet strip (see Section 10)
+- **Shared encoding bias** — Across all Gabor variants tested (resized 128² and native 64×512 strip), impostor pairs settle at similarity ~0.57, well above the 0.50 floor for independent codes (see Section 10.2). The fixed-filter binary code retains a shared signature regardless of input geometry.
 
 However, the Gabor baseline requires no training data and runs in ~1ms per comparison — useful as a lightweight pre-filter or in resource-constrained environments.
 
@@ -386,15 +386,23 @@ With only **405 genuine pairs**, the EER estimates have substantial uncertainty.
 
 The confidence intervals **overlap substantially** (ArcFace upper bound 5.19% > Softmax lower bound 2.47%). Therefore, the difference in EER between ArcFace and Softmax is **not statistically significant** at the 95% confidence level. The claim "ArcFace beats Softmax" is directionally supported but not conclusively proven with this test set size. A larger test set with more multi-sample identities would be needed for statistical significance.
 
-### 10.2 Gabor Baseline Disadvantage
+### 10.2 Gabor Baseline Bottleneck — Hypothesis Tested & Rejected
 
-The Gabor filter bank is applied to **128×128 resized images**, not the original (64, 512) rubber-sheet normalised strip. This introduces two disadvantages:
+The Phase 6 Gabor baseline is applied to **128×128 resized images**, not the original (64, 512) rubber-sheet strip. The original report hypothesised that this isotropic resize was the limiting factor — compressing the angular dimension 4× and distorting the spatial frequencies Gabor filters were designed to capture — and that applying Gabor on the native strip would yield a fairer (better) classical baseline.
 
-1. **Aspect ratio distortion** — The rubber-sheet strip has an 8:1 aspect ratio (512 angular × 64 radial). Resizing to 128×128 compresses the angular dimension by 4× and stretches the radial dimension by 2×, distorting the spatial frequency content that Gabor filters are designed to capture.
+**This hypothesis was tested and rejected.** Two strip-Gabor variants were implemented and evaluated against the closed-set test split:
 
-2. **Shared preprocessing artefacts** — The impostor mean similarity is 0.5712, above the theoretical 0.50 for independent codes. Common artefacts (eyelid shadows, normalisation padding, consistent zero-mean centering) create shared patterns across all images, reducing the effective discriminability of the IrisCode.
+| Variant | EER | TAR@FAR=1% | Genuine mean | Impostor mean | Gap |
+|---|---|---|---|---|---|
+| **Gabor (128×128 resized)** | **26.67%** | **42.72%** | 0.686 | 0.571 | 0.115 |
+| Gabor (64×512 strip, naive) | 30.04% | 38.46% | 0.661 | 0.569 | 0.092 |
+| Gabor (64×512 strip, cyclic + occlusion mask) | 29.78% | 37.72% | 0.658 | 0.567 | 0.091 |
 
-A fairer comparison would apply Gabor filters to the original (64, 512) normalised strip. This baseline should therefore be interpreted as a lower bound on classical Gabor performance.
+Both strip variants performed *worse* than the resized baseline by ~3 EER points. The engineering corrections — cyclic angular wrap-around (so θ=0 ≡ θ=2π under convolution) and an upper-eyelid occlusion mask covering ±60° around 12 o'clock — barely moved the needle (0.3 EER points).
+
+**The actual bottleneck is shared encoding artefacts, not aspect ratio.** Across all three variants the impostor mean similarity is ~0.57, well above the 0.50 floor for statistically independent codes. This residual correlation is the same in both spatial domains, so re-encoding in polar coordinates cannot escape it. The likely cause is the radial luminance gradient (pupil edge brighter than iris edge) shared across all images, which produces a consistent DC-like response that survives binarisation regardless of the Gabor bank's geometry.
+
+**Implication.** The Gabor baseline's 26.67% EER is not the cap of "classical Gabor with better preprocessing" but is genuinely close to the cap of "fixed-filter binary IrisCode on this dataset under our preprocessing". Closing the gap would require attacking the shared-pattern bias directly (per-row contrast normalisation, learned masking, occlusion-aware comparison), not just preserving native resolution. The strip encoder is retained in `src/models/gabor_baseline.py` (`extract_iris_code_strip`, `extract_iris_code_strip_v2`) for reproducibility and future ablations.
 
 ### 10.3 Closed-Set Evaluation Protocol
 
@@ -477,7 +485,7 @@ Open-set plots are saved to `figures/openset/`:
 | 10.1 Statistical significance (405 pairs) | **Resolved** — 13,216 genuine pairs confirm ArcFace > Softmax across all metrics |
 | 10.3 Closed-set protocol | **Resolved** — identity-disjoint split with 396 unseen test identities |
 | 10.4 t-SNE sparsity (41 multi-sample points) | **Resolved** — hundreds of points per top-20 identity |
-| 10.2 Gabor aspect-ratio disadvantage | Unchanged — would require a separate preprocessing pipeline |
+| 10.2 Gabor aspect-ratio disadvantage | **Hypothesis rejected** — strip-Gabor variants tested separately, both ~3 EER points *worse* than resized; bottleneck is shared encoding artefacts (impostor mean 0.57 ≫ 0.50), not aspect ratio |
 | 10.5 Single dataset | Unchanged — cross-dataset evaluation is listed as future work |
 
 ---
@@ -500,6 +508,6 @@ Two training findings stand out:
 - **Improved segmentation** — Replace HoughCircles with a learned segmentation network (e.g., U-Net) to improve the 62.7% detection rate.
 - **Attention mechanisms** — Add channel/spatial attention (SE blocks, CBAM) to focus on discriminative iris texture regions.
 - **Open-set protocols** — Evaluate with disjoint train/test identity sets for a more rigorous generalisation test.
-- **Gabor on original strip** — Apply Gabor filters to the (64, 512) rubber-sheet strip for a fairer classical baseline.
+- **Per-row contrast normalisation for Gabor** — The strip-Gabor experiment (Section 10.2) showed that aspect ratio is not the bottleneck; the shared radial luminance gradient is. Per-row mean removal or histogram equalisation on the strip before filtering would attack this directly.
 - **Fusion** — Combine deep learning and Gabor features via score-level or feature-level fusion.
 - **Larger test set** — Increase multi-sample identities in the test set to improve statistical significance of EER comparisons.
