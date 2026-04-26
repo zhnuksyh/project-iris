@@ -14,7 +14,9 @@ import tensorflow as tf
 
 from src.models.train_arcface import build_arcface_model
 from src.models.train_softmax import build_softmax_model
-from src.models.gabor_baseline import extract_iris_code
+from src.models.gabor_baseline import (
+    extract_iris_code, extract_iris_code_strip, extract_iris_code_strip_v2,
+)
 
 ARCFACE_MODEL_PATH = 'models/arcface_best.h5'
 SOFTMAX_MODEL_PATH = 'models/softmax_best.h5'
@@ -114,6 +116,86 @@ def extract_gabor_codes(images: np.ndarray) -> np.ndarray:
             print(f'[embeddings] Gabor codes: {i + 1}/{n}')
     print(f'[embeddings] Gabor codes: {n}/{n} done')
     return np.stack(codes, axis=0)
+
+
+def load_test_strips(processed_paths: list,
+                     strip_root: str = 'data/processed_strip') -> tuple:
+    """Load (64, 512) Daugman rubber-sheet strips for the given test images.
+
+    The strip files mirror the layout of the processed .npy tree but live
+    under a separate root. If a strip file is missing for a sample (e.g.
+    segmentation failed when strips were regenerated), that sample is
+    silently dropped and the caller receives the index mask of which
+    samples have valid strips.
+
+    Args:
+        processed_paths: list of paths under data/processed/.
+        strip_root: root directory holding the regenerated strips.
+
+    Returns:
+        (strips, kept_mask) where
+          strips    is np.ndarray of shape (M, 64, 512) uint8, M <= N
+          kept_mask is np.ndarray of shape (N,) bool, True where the strip
+                    was present and loaded successfully
+    """
+    import os
+    strips = []
+    kept = np.zeros(len(processed_paths), dtype=bool)
+    for i, p in enumerate(processed_paths):
+        strip_path = os.path.join(strip_root,
+                                  os.path.relpath(p, 'data/processed'))
+        if os.path.isfile(strip_path):
+            strips.append(np.load(strip_path))
+            kept[i] = True
+    if not strips:
+        return np.empty((0, 64, 512), dtype=np.uint8), kept
+    return np.stack(strips, axis=0), kept
+
+
+def extract_gabor_codes_strip(strips: np.ndarray) -> np.ndarray:
+    """Extract Gabor IrisCodes from native (64, 512) rubber-sheet strips.
+
+    Naive variant — same Gabor bank as the (128, 128) baseline, applied
+    directly to the strip. Retained for ablation; production evaluation
+    uses `extract_gabor_codes_strip_v2`.
+
+    Args:
+        strips: (N, 64, 512) uint8 or float array.
+
+    Returns:
+        (N, 524288) bool array.
+    """
+    n = strips.shape[0]
+    codes = []
+    for i in range(n):
+        codes.append(extract_iris_code_strip(strips[i]))
+        if (i + 1) % 500 == 0:
+            print(f'[embeddings] Strip-Gabor codes: {i + 1}/{n}')
+    print(f'[embeddings] Strip-Gabor codes: {n}/{n} done')
+    return np.stack(codes, axis=0)
+
+
+def extract_gabor_codes_strip_v2(strips: np.ndarray) -> tuple:
+    """Engineered strip-Gabor: anisotropic kernels, cyclic angular padding,
+    eyelid occlusion mask.
+
+    Args:
+        strips: (N, 64, 512) array.
+
+    Returns:
+        (codes, masks) — both (N, 262144) bool arrays. masks[i, b] is True
+        when bit b of code i is valid (not occluded).
+    """
+    n = strips.shape[0]
+    codes, masks = [], []
+    for i in range(n):
+        c, m = extract_iris_code_strip_v2(strips[i])
+        codes.append(c)
+        masks.append(m)
+        if (i + 1) % 500 == 0:
+            print(f'[embeddings] Strip-Gabor v2 codes: {i + 1}/{n}')
+    print(f'[embeddings] Strip-Gabor v2 codes: {n}/{n} done')
+    return np.stack(codes, axis=0), np.stack(masks, axis=0)
 
 
 def _batch_inference(model: tf.keras.Model, images: np.ndarray) -> np.ndarray:

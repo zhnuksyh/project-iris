@@ -109,3 +109,37 @@ def compute_hamming_scores(codes: np.ndarray, pairs: list,
         scores[start:end] = 1.0 - hd
 
     return scores
+
+
+def compute_hamming_scores_masked(codes: np.ndarray, masks: np.ndarray,
+                                  pairs: list, chunk_size: int = 1000) -> np.ndarray:
+    """Hamming similarity (1 - HD) per pair, restricted to bits valid in both
+    codes' masks.
+
+    Args:
+        codes: (N, code_len) bool array.
+        masks: (N, code_len) bool array. True = bit is valid (use in compare).
+        pairs: list of (i, j) index tuples.
+        chunk_size: process pairs in chunks to limit memory usage.
+
+    Returns:
+        1-D array of similarity scores (1 - HD). For pairs whose intersection
+        mask is empty, returns 0.0 (max distance == 1, similarity == 0).
+    """
+    pairs_arr = np.array(pairs)
+    scores = np.empty(len(pairs_arr), dtype=np.float32)
+
+    for start in range(0, len(pairs_arr), chunk_size):
+        end = min(start + chunk_size, len(pairs_arr))
+        chunk = pairs_arr[start:end]
+        c_a = codes[chunk[:, 0]]
+        c_b = codes[chunk[:, 1]]
+        m_a = masks[chunk[:, 0]]
+        m_b = masks[chunk[:, 1]]
+        valid = m_a & m_b
+        n_valid = valid.sum(axis=1)
+        diffs = ((c_a ^ c_b) & valid).sum(axis=1)
+        hd = np.where(n_valid > 0, diffs / np.maximum(n_valid, 1), 1.0)
+        scores[start:end] = 1.0 - hd
+
+    return scores
