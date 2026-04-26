@@ -175,6 +175,8 @@ def run(openset: bool = False):
             'genuine_mean':      float(gen.mean()),
             'impostor_mean':     float(imp.mean()),
             'gap':               float(gen.mean() - imp.mean()),
+            'genuine_pairs':     int(len(gen)),
+            'impostor_pairs':    int(len(imp)),
         }
 
     os.makedirs(os.path.dirname(results_json), exist_ok=True)
