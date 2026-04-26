@@ -13,6 +13,7 @@ __pycache__/
 # Dataset directories (never commit raw or processed image data)
 data/raw/
 data/processed/
+data/processed_strip/
 data/processed.zip
 
 # OS artifacts
